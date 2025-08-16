@@ -1,5 +1,5 @@
 # macos-electron-accessibility-fix
-Production solution for macOS Accessibility API error -25212 in Electron applications. Enables reliable automation of Claude Desktop, ChatGPT, Slack, and other Electron apps.
+Solution for macOS Accessibility API error -25212 in Electron applications. Enables reliable automation of Claude Desktop, ChatGPT, Slack, and other Electron apps.
 
 # macOS Electron Accessibility Fix
 **Finally solve the notorious macOS Accessibility API error -25212 in Electron applications.**
@@ -18,7 +18,7 @@ Development: VS Code variants • Electron-based IDEs
 Automation tools consistently fail when accessing UI elements in Electron applications on macOS with error -25212 (kAXErrorCannotComplete):
 
 ❌ Works in testing, fails in production ← If this is happening to you, this repository solves it
-❌ 60-80% failure rates in production environments
+❌ 60-80% failure rates in tested environments
 ❌ Manual warm-up scripts needed before automation
 ❌ No reliable programmatic solution existed... until now
 
