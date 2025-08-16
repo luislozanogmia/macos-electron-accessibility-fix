@@ -92,7 +92,7 @@ We welcome contributions! This fix has will need to be battle-tested in producti
 License
 MIT License - Use freely in commercial and open-source projects.
 
-cknowledgments
+Acknowledgments
 Developed for the AM Beta automation platform and shared with the community. Special thanks to the accessibility and automation communities for their ongoing work to improve desktop automation reliability.
 
 ⭐ If this solved your Electron automation problems, please star the repo!
