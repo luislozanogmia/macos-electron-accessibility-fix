@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-macOS Accessibility Tree Initializer
-====================================
+macOS Accessibility Tree Initializer v1.1
+=========================================
 
 A lightweight helper utility to initialize accessibility (AX) trees for
 Electron applications on macOS, addressing the common error
@@ -10,6 +10,12 @@ Electron applications on macOS, addressing the common error
 The utility "encourages" macOS to build complete accessibility trees by
 reading the AXRole attribute from target applications. This forces the
 `universalaccessd` daemon to create session-persistent accessibility state.
+
+Release Notes:
+  * Prefer 2-argument API for AXRole attribute access.
+  * Skip background helper processes (e.g., those with "Helper", "Networking", or "Service" in their names).
+  * Initialization must be run per app and re-run per request for reliability (cached per session but can reset on relaunch).
+  * Treat error -25212 as partial rather than fatal, reflecting partial accessibility availability.
 
 Usage:
     python macos_ax_initializer.py                       # Initialize known Electron apps
@@ -160,47 +166,35 @@ class AXInitializer:
     
     def _ax_get_role_robust(self, app_element) -> Tuple[int, Optional[str]]:
         """
-        Robust AX role attribute getter with API signature compatibility.
+        Robust AX role attribute getter using 2-argument API.
         
-        Handles both 2-argument and 3-argument AXUIElementCopyAttributeValue signatures
-        that exist across different macOS versions and PyObjC installations.
+        Handles the AXUIElementCopyAttributeValue signature that accepts two arguments,
+        per updated macOS API usage and PyObjC bindings.
         """
         try:
-            # Try 3-argument version first (newer API)
-            result = AXUIElementCopyAttributeValue(app_element, kAXRoleAttribute, None)
+            result = AXUIElementCopyAttributeValue(app_element, kAXRoleAttribute)
             
             if isinstance(result, tuple) and len(result) == 2:
                 error_code, role_value = result
                 return error_code, role_value
             else:
-                # Success case - no error tuple returned
                 return 0, result
                 
-        except TypeError:
-            # Fall back to 2-argument version (older API)
-            try:
-                result = AXUIElementCopyAttributeValue(app_element, kAXRoleAttribute)
-                
-                if isinstance(result, tuple) and len(result) == 2:
-                    error_code, role_value = result
-                    return error_code, role_value
-                else:
-                    return 0, result
-                    
-            except Exception as e:
-                self.logger.debug(f"AX role read failed: {e}")
-                return -25212, None  # Return the specific error code we're addressing
-        
         except Exception as e:
             self.logger.debug(f"AX role read failed: {e}")
-            return -25212, None
+            return -25212, None  # Return the specific error code we're addressing
     
-    def initialize_app_accessibility(self, app_info: AppInfo) -> bool:
+    def initialize_app_accessibility(self, app_info: AppInfo) -> str:
         """
         Initialize accessibility tree for a specific application.
         
         This is the core mechanism that addresses error -25212 by forcing
         the accessibility system to build and cache the UI element tree.
+        
+        Returns:
+            'success' if fully initialized,
+            'partial' if error -25212 encountered,
+            'failure' otherwise.
         """
         try:
             self.logger.info(f"🎯 Initializing accessibility for {app_info.name} (PID: {app_info.pid})")
@@ -214,19 +208,19 @@ class AXInitializer:
             
             if error_code == 0 and role:
                 self.logger.info(f"✅ Accessibility initialized successfully: {role}")
-                return True
+                return 'success'
             elif error_code == -25212:
-                self.logger.warning(f"⚠️  Error -25212 detected - accessibility may be incomplete")
-                return False
+                self.logger.warning(f"⚠️  Error -25212 detected - accessibility may be partial")
+                return 'partial'
             else:
                 self.logger.warning(f"⚠️  Accessibility init returned error code: {error_code}")
-                return False
+                return 'failure'
                 
         except Exception as e:
             self.logger.error(f"❌ Failed to initialize accessibility for {app_info.name}: {e}")
-            return False
+            return 'failure'
     
-    def initialize_multiple_apps(self, app_infos: List[AppInfo]) -> Dict[str, bool]:
+    def initialize_multiple_apps(self, app_infos: List[AppInfo]) -> Dict[str, str]:
         """Initialize accessibility for multiple applications"""
         results = {}
         
@@ -234,28 +228,50 @@ class AXInitializer:
             self.logger.warning("No applications to initialize")
             return results
         
-        self.logger.info(f"🔧 Initializing accessibility for {len(app_infos)} applications...")
+        # Filter out background helper processes
+        filtered_apps = [
+            app for app in app_infos
+            if not any(substr.lower() in app.name.lower() for substr in ("Helper", "Networking", "Service"))
+        ]
+        skipped_apps = [app for app in app_infos if app not in filtered_apps]
         
-        for app_info in app_infos:
-            success = self.initialize_app_accessibility(app_info)
-            results[app_info.name] = success
+        self.logger.info(f"🔧 Initializing accessibility for {len(filtered_apps)} applications (skipped {len(skipped_apps)} helper/background apps)...")
+        
+        for app_info in filtered_apps:
+            status = self.initialize_app_accessibility(app_info)
+            results[app_info.name] = status
             
             # Small delay between initializations to avoid overwhelming the system
             time.sleep(0.1)
         
         # Summary
-        successful = sum(1 for success in results.values() if success)
-        self.logger.info(f"🎉 Accessibility initialization complete: {successful}/{len(app_infos)} successful")
+        successful = [name for name, stat in results.items() if stat == 'success']
+        partials = [name for name, stat in results.items() if stat == 'partial']
+        failures = [name for name, stat in results.items() if stat == 'failure']
+        skipped = [app.name for app in skipped_apps]
+        
+        self.logger.info(f"🎉 Accessibility initialization complete: {len(successful)}/{len(filtered_apps)} successful")
+        if successful:
+            self.logger.info(f"✅ Successes: {', '.join(successful)}")
+        if partials:
+            self.logger.info(f"⚠️  Partial: {', '.join(partials)}")
+        if failures:
+            self.logger.info(f"❌ Failures: {', '.join(failures)}")
+        if skipped:
+            self.logger.info(f"⏭️  Skipped helper/background apps: {', '.join(skipped)}")
         
         return results
     
-    def initialize_electron_apps(self) -> Dict[str, bool]:
+    def initialize_electron_apps(self) -> Dict[str, str]:
         """Initialize accessibility for known Electron applications"""
         all_apps = self.get_running_applications()
-        electron_apps = []
         
+        electron_apps = []
         for app in all_apps:
             if any(electron_name in app.name.lower() for electron_name in self.ELECTRON_APPS):
+                # Skip background helper processes
+                if any(substr.lower() in app.name.lower() for substr in ("Helper", "Networking", "Service")):
+                    continue
                 electron_apps.append(app)
         
         if not electron_apps:
@@ -343,10 +359,12 @@ that affects automation tools working with Electron applications.
         results = initializer.initialize_electron_apps()
     
     # Return appropriate exit code
-    if results and any(results.values()):
+    if results and any(status == 'success' for status in results.values()):
         return 0  # At least one success
     else:
         return 1  # No successes or no apps processed
 
 if __name__ == "__main__":
     sys.exit(main())
+
+__all__ = ["AXInitializer", "AppInfo", "main"]
